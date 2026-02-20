@@ -6,7 +6,8 @@ import shutil
 import io
 import re
 from openai import OpenAI
-from langdetect import detect, LangDetectException
+import fasttext
+from langdetect import detect, LangDetectException  # fallback, якщо fasttext не завантажиться
 from collections import Counter
 
 st.set_page_config(
@@ -15,6 +16,13 @@ st.set_page_config(
     layout="wide"
 )
 
+# Завантажуємо модель fasttext один раз (lid.176.bin — 176 мов)
+try:
+    lang_model = fasttext.load_model('lid.176.bin')
+except Exception as e:
+    st.warning(f"Не вдалося завантажити fasttext модель: {e}. Використовуємо langdetect як fallback.")
+    lang_model = None
+
 # Session state
 if 'processed' not in st.session_state:
     st.session_state.processed = False
@@ -22,30 +30,49 @@ if 'result' not in st.session_state:
     st.session_state.result = None
 
 def detect_language(text: str) -> str:
-    try:
-        if len(text.strip()) < 50:
-            return "uk"
-        lang = detect(text)
+    """Визначення мови за допомогою fasttext або langdetect"""
+    text = text.replace('\n', ' ').strip()
+    if len(text) < 50:
+        return "de"  # дефолт для німецької, можна змінити на "uk"
+
+    if lang_model:
+        pred = lang_model.predict(text, k=1)
+        lang = pred[0][0].replace('__label__', '')
         return lang
-    except LangDetectException:
-        return "uk"
+    else:
+        # Fallback на langdetect
+        try:
+            return detect(text)
+        except LangDetectException:
+            return "de"
 
 def get_site_language(html_files: list) -> str:
+    """Визначає домінуючу мову сайту"""
     langs = []
     for path in html_files:
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                soup_text = re.sub(r'<[^>]+>', ' ', f.read())
-                lang = detect_language(soup_text)
-                if lang:
-                    langs.append(lang)
+                content = f.read()
+            # Беремо текст без тегів
+            text = re.sub(r'<[^>]+>', ' ', content)[:5000]  # обмежуємо розмір
+            lang = detect_language(text)
+            if lang:
+                langs.append(lang)
         except:
             pass
+    
     if not langs:
-        return "uk"
+        return "de"  # німецька як дефолт (можна змінити)
+
     most_common = Counter(langs).most_common(1)[0][0]
-    lang_map = {'uk': 'Українська', 'ru': 'Російська', 'en': 'Англійська'}
-    return lang_map.get(most_common, "Українська")
+    lang_map = {
+        'de': 'Німецька',
+        'uk': 'Українська',
+        'ru': 'Російська',
+        'en': 'Англійська',
+        'fr': 'Французька'
+    }
+    return lang_map.get(most_common, "Німецька")
 
 def rewrite_content(client, original_html: str, language: str) -> str:
     prompt = f"""
@@ -65,9 +92,9 @@ def rewrite_content(client, original_html: str, language: str) -> str:
 
     try:
         resp = client.chat.completions.create(
-            model="grok-code-fast-1",  # швидка для тексту/HTML
+            model="grok-code-fast-1",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.75,
+            temperature=0.7,
             max_tokens=8192,
             timeout=600
         )
@@ -112,7 +139,7 @@ if uploaded_files and api_key:
         progress = st.progress(0)
         status = st.empty()
 
-        # 1. Збереження
+        # 1. Збереження архівів
         status.text("Зберігаємо архіви...")
         archive_paths = []
         for i, f in enumerate(uploaded_files):
@@ -128,8 +155,13 @@ if uploaded_files and api_key:
         for arch_idx, arch in enumerate(archive_paths):
             extract_dir = os.path.join(temp_rewritten, f"arch_{arch_idx}")
             os.makedirs(extract_dir, exist_ok=True)
-            with zipfile.ZipFile(arch, 'r') as z:
-                z.extractall(extract_dir)
+            try:
+                with zipfile.ZipFile(arch, 'r') as z:
+                    z.extractall(extract_dir)
+            except:
+                st.warning(f"Не вдалося розпакувати {os.path.basename(arch)}")
+                continue
+
             html_files = [os.path.join(root, f) for root, _, fs in os.walk(extract_dir) for f in fs if f.lower().endswith('.html')]
 
             lang = get_site_language(html_files)
@@ -145,20 +177,18 @@ if uploaded_files and api_key:
             all_rewritten_dirs.append(extract_dir)
             progress.progress(0.1 + (arch_idx+1)/len(archive_paths) * 0.4)
 
-        # 3. Клонування (тут встав свій код заміни доменів)
+        # 3. Клонування (заміна доменів — тут твій код або приклад)
         status.text("Створюємо 5 копій з новими доменами...")
-        # Приклад: створюємо 5 копій кожного переписаного архіву
         master_zip_path = os.path.join(temp_clones, "duplicates.zip")
         with zipfile.ZipFile(master_zip_path, 'w', zipfile.ZIP_DEFLATED) as master_zip:
             for var_num in range(1, 6):
                 for dir_idx, rewritten_dir in enumerate(all_rewritten_dirs):
                     new_dir = os.path.join(temp_clones, f"var_{var_num}_arch_{dir_idx}")
                     shutil.copytree(rewritten_dir, new_dir, dirs_exist_ok=True)
-                    # Тут можна додати заміну доменів у файлах (твій BatchProcessor)
-                    # Наприклад:
-                    # replace_domain_in_dir(new_dir, old_domain, new_domain + domain_zone)
+                    # Додай тут заміну доменів (наприклад, функцію replace_domain_in_dir)
+                    # Приклад:
+                    # replace_domain_in_dir(new_dir, "old-domain.com", f"newdomain{var_num}{domain_zone}")
 
-                    # Додаємо в головний архів
                     for root, _, files in os.walk(new_dir):
                         for file in files:
                             full = os.path.join(root, file)
