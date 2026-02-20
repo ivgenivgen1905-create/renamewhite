@@ -2,3 +2,4 @@ streamlit
 openai
 langdetect
 beautifulsoup4
+fasttext-wheel
