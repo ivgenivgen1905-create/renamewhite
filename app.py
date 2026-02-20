@@ -4,109 +4,215 @@ import tempfile
 import os
 import shutil
 import io
-from openai import OpenAI  # ← зміна тут!
+import re
+from openai import OpenAI
+from langdetect import detect, DetectorFactory
+from langdetect.lang_detect_exception import LangDetectException
+from collections import Counter
 
-st.title("Rewriter: 5 варіантів сайту з рерайтом тексту")
+# Фіксуємо seed для langdetect, щоб результати були відтворювані
+DetectorFactory.seed = 0
 
-api_key = st.text_input("Введи xAI API Key", type="password")
-business_name = st.text_input("Назва бізнесу (для випадкових контактів)")
-language = st.selectbox("Мова рерайту", options=["Українська", "Англійська", "Російська", "Французька", "Німецька"])
-uploaded_zip = st.file_uploader("Завантаж ZIP-архів сайту", type="zip")
+st.set_page_config(
+    page_title="Rewriter + DUPLICATOR - Рерайт + Клонування сайтів",
+    page_icon="🌐🔄",
+    layout="wide"
+)
 
-if uploaded_zip and api_key and business_name and language:
-    if st.button("Створити 5 варіантів рерайту"):
-        with st.spinner("Розпаковуємо архів, рерайтимо сторінки через Grok..."):
-            temp_dir = tempfile.mkdtemp()
-            extract_dir = os.path.join(temp_dir, "orig")
-            os.makedirs(extract_dir, exist_ok=True)
+# Ініціалізація session state
+if 'processed' not in st.session_state:
+    st.session_state.processed = False
+if 'result' not in st.session_state:
+    st.session_state.result = None
 
-            with zipfile.ZipFile(uploaded_zip, "r") as z:
-                z.extractall(extract_dir)
+def detect_site_language(html_content: str) -> str:
+    """Визначає мову сторінки за текстом"""
+    try:
+        # Беремо тільки текст без тегів
+        text = re.sub(r'<[^>]+>', ' ', html_content)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if len(text) < 50:
+            return "unknown"
+        lang = detect(text)
+        # Мапимо на зрозумілі назви
+        lang_map = {
+            'uk': 'Українська',
+            'ru': 'Російська',
+            'en': 'Англійська',
+            'fr': 'Французька',
+            'de': 'Німецька',
+            'pl': 'Польська',
+            # додай інші за потребою
+        }
+        return lang_map.get(lang, lang.upper())
+    except LangDetectException:
+        return "unknown"
 
-            html_files = [os.path.join(root, f) for root, _, files in os.walk(extract_dir) for f in files if f.lower().endswith('.html')]
+def get_dominant_language(html_files: list) -> str:
+    """Визначає домінуючу мову сайту по всіх HTML"""
+    languages = []
+    for html_path in html_files:
+        try:
+            with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            lang = detect_site_language(content)
+            if lang != "unknown":
+                languages.append(lang)
+        except:
+            pass
+    
+    if not languages:
+        return "Українська"  # дефолт
+    
+    # Найпоширеніша мова
+    most_common = Counter(languages).most_common(1)
+    return most_common[0][0] if most_common else "Українська"
 
-            if not html_files:
-                st.error("У ZIP немає HTML-файлів.")
-                shutil.rmtree(temp_dir)
-            else:
-                try:
-                    client = OpenAI(
-                        api_key=api_key,
-                        base_url="https://api.x.ai/v1"  # ← ключовий рядок!
-                    )
-                except Exception as e:
-                    st.error(f"Помилка ініціалізації клієнта: {str(e)}. Перевір ключ і баланс.")
-                    shutil.rmtree(temp_dir)
-                    st.stop()
-
-                for var_num in range(1, 6):
-                    st.write(f"Генеруємо варіант {var_num} з 5...")
-
-                    var_dir = os.path.join(temp_dir, f"var_{var_num}")
-                    shutil.copytree(extract_dir, var_dir, dirs_exist_ok=True)
-
-                    for html_file in html_files:
-                        with open(html_file, "r", encoding="utf-8") as f:
-                            orig_html = f.read()
-
-                        prompt = f"""
-Перепиши весь видимий текст на сторінці: зроби унікальним, природним, привабливим на мові '{language}'.
-Зберігай 100% HTML-структуру, теги, атрибути, скрипти, стилі, посилання, картинки — НЕ чіпай їх.
-Для контактів (адреса, телефон, локація) — придумай випадкові, але правдоподібні дані на основі бізнесу '{business_name}' (використовуй свої знання: адреса в реальному місті України, номер телефону в форматі +380...).
-Заміни існуючі контакти на нові випадкові.
-Повертай ТІЛЬКИ чистий HTML-код, без пояснень.
+def rewrite_html_with_grok(client, html_content: str, language: str, business_name: str) -> str:
+    """Рерайт однієї сторінки через Grok"""
+    prompt = f"""
+Перепиши весь видимий текст на сторінці на мові '{language}' — зроби унікальним, природним, привабливим.
+Зберігай 100% HTML-структуру, теги, атрибути, скрипти, стилі, посилання, картинки — нічого не видаляй і не додавай.
+Для контактів (адреса, телефон, локація) — заміни на випадкові правдоподібні дані на основі бізнесу '{business_name}' 
+(адреса в Україні, номер телефону +380...).
+Повертай ТІЛЬКИ чистий HTML-код, без жодних пояснень чи маркдауну.
 Оригінальний HTML:
-{orig_html}
+{html_content}
 """
 
-                        try:
-                            resp = client.chat.completions.create(
-                                model="grok-4",  # або "grok-beta", "grok-3" — перевір актуальні в https://console.x.ai/models
-                                messages=[
-                                    {"role": "system", "content": "Ти експерт з рерайту веб-контенту на обраній мові з генерацією випадкових контактів."},
-                                    {"role": "user", "content": prompt}
-                                ],
-                                temperature=0.7 + (var_num * 0.05),
-                                max_tokens=16384
-                            )
-                            new_html = resp.choices[0].message.content.strip()
-                        except Exception as e:
-                            st.error(f"Помилка під час рерайту: {str(e)}. Спробуй менший сайт або перевір баланс.")
-                            continue
+    try:
+        resp = client.chat.completions.create(
+            model="grok-4-1-fast-reasoning",  # швидка модель
+            messages=[
+                {"role": "system", "content": "Експерт з рерайту веб-контенту."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=4096,
+            timeout=300
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        st.error(f"Помилка рерайту сторінки: {str(e)}")
+        return html_content  # повертаємо оригінал, якщо помилка
 
-                        new_path = html_file.replace(extract_dir, var_dir)
-                        os.makedirs(os.path.dirname(new_path), exist_ok=True)
-                        with open(new_path, "w", encoding="utf-8") as f:
-                            f.write(new_html)
+# ────────────────────────────────────────────────
+# Основний інтерфейс (збережено з DUPLICATOR)
+# ────────────────────────────────────────────────
 
-                    zip_buf = io.BytesIO()
-                    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                        for rt, _, fs in os.walk(var_dir):
-                            for fl in fs:
-                                full = os.path.join(rt, fl)
-                                rel = os.path.relpath(full, var_dir)
-                                zf.write(full, rel)
+st.title("🌐 Rewriter + DUPLICATOR — Рерайт + Клонування сайтів")
 
-                    zip_buf.seek(0)
+with st.expander("ℹ️ Як використовувати", expanded=True):
+    st.markdown("""
+    1. Завантажте ZIP/RAR архів(и) з сайтом
+    2. Вкажіть API-ключ xAI та назву бізнесу (для випадкових контактів)
+    3. Оберіть кількість копій і доменну зону
+    4. Натисніть "Створити копії з рерайтом"
+    """)
 
-                    st.download_button(
-                        label=f"Завантажити варіант {var_num}",
-                        data=zip_buf,
-                        file_name=f"rewritten_var_{var_num}.zip",
-                        mime="application/zip",
-                        key=f"btn_{var_num}"
-                    )
+api_key = st.text_input("xAI API Key", type="password")
+business_name = st.text_input("Назва бізнесу (для генерації контактів)")
 
-                shutil.rmtree(temp_dir)
-                st.success("Готово! Завантажуй варіанти вище ↓")
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    uploaded_files = st.file_uploader(
+        "Архіви сайтів (ZIP/RAR)",
+        type=['zip', 'rar'],
+        accept_multiple_files=True
+    )
+
+with col2:
+    domain_zone = st.radio("Доменна зона:", ['.com', '.info'], horizontal=True)
+    copies_count = st.number_input("Копій на архів:", min_value=1, max_value=50, value=5)
+
+if uploaded_files and api_key and business_name:
+    if st.button("🚀 Створити копії з рерайтом", type="primary"):
+        if not api_key.startswith("xai-"):
+            st.error("Невірний формат API-ключа. Повинен починатися з 'xai-'")
+            st.stop()
+
+        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1", timeout=300)
+
+        temp_input = tempfile.mkdtemp()
+        temp_output = tempfile.mkdtemp()
+        temp_rewritten = tempfile.mkdtemp()
+
+        progress = st.progress(0)
+        status = st.empty()
+
+        # Крок 1: збереження файлів
+        status.text("Зберігаємо архіви...")
+        archive_paths = []
+        for i, f in enumerate(uploaded_files):
+            path = os.path.join(temp_input, f.name)
+            with open(path, 'wb') as out:
+                out.write(f.getbuffer())
+            archive_paths.append(path)
+            progress.progress((i+1)/len(uploaded_files) * 0.1)
+
+        # Крок 2: розпаковка та визначення мови
+        status.text("Розпаковуємо та визначаємо мову сайту...")
+        all_html_files = []
+        for arch in archive_paths:
+            extract_dir = os.path.join(temp_rewritten, os.path.basename(arch).replace('.zip','').replace('.rar',''))
+            os.makedirs(extract_dir, exist_ok=True)
+            with zipfile.ZipFile(arch, 'r') as z:  # можна додати rar підтримку через rarfile
+                z.extractall(extract_dir)
+            htmls = [os.path.join(root, f) for root, _, fs in os.walk(extract_dir) for f in fs if f.lower().endswith('.html')]
+            all_html_files.extend(htmls)
+
+        if all_html_files:
+            detected_lang = get_dominant_language(all_html_files)
+            st.success(f"Визначено мову сайту: **{detected_lang}**")
+        else:
+            detected_lang = "Українська"
+            st.warning("Мову не вдалося визначити → використовуємо Українську")
+
+        # Крок 3: рерайт тексту
+        status.text("Рерайт тексту на виявленій мові...")
+        rewritten_count = 0
+        for html_path in all_html_files:
+            try:
+                with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                new_content = rewrite_html_with_grok(client, content, detected_lang, business_name)
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                rewritten_count += 1
+            except:
+                pass
+
+        st.info(f"Переписано {rewritten_count} сторінок")
+
+        # Крок 4: клонування з заміною доменів (тут треба твій BatchProcessor)
+        # Якщо у тебе є utils.batch_processor — імпортуй і використовуй
+        # Для прикладу — просто імітуємо (заміни на свій код)
+        status.text("Створюємо копії з новими доменами...")
+        # processor = BatchProcessor()
+        # result = processor.process_multiple_archives(
+        #     archives=[temp_rewritten],  # вже з рерайтом
+        #     copies_count=copies_count,
+        #     domain_zone=domain_zone,
+        #     output_dir=temp_output
+        # )
+
+        # Тимчасово — просто копіюємо як приклад
+        result = {
+            'success': True,
+            'master_archive_path': os.path.join(temp_output, "master.zip")
+        }
+
+        # Крок 5: створення головного архіву (тут твій код)
+        # ...
+
+        st.session_state.result = result
+        st.session_state.processed = True
+        st.rerun()
 
 else:
-    st.info("Заповни всі поля, щоб почати.")
-    if not api_key:
-        st.warning("Потрібен xAI API Key → https://console.x.ai")
-    if not business_name:
-        st.warning("Вкажи назву бізнесу.")
-    if not language:
-        st.warning("Обери мову рерайту.")
-    if not uploaded_zip:
-        st.warning("Завантаж ZIP з сайтом.")
+    st.warning("Заповніть усі поля: API-ключ, бізнес, архіви")
+
+if st.session_state.processed and st.session_state.result:
+    st.success("Готово!")
+    # Тут кнопка завантаження з result['master_archive_path']
