@@ -6,7 +6,6 @@ import shutil
 import io
 import re
 from openai import OpenAI
-import fasttext
 from langdetect import detect, LangDetectException
 from collections import Counter
 
@@ -16,13 +15,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Завантаження fasttext моделі (lid.176.bin — 176 мов)
-try:
-    lang_model = fasttext.load_model('lid.176.bin')
-except Exception as e:
-    st.warning(f"FastText модель не завантажилася: {e}. Використовуємо langdetect.")
-    lang_model = None
-
 # Session state
 if 'processed' not in st.session_state:
     st.session_state.processed = False
@@ -30,28 +22,33 @@ if 'result' not in st.session_state:
     st.session_state.result = None
 
 def detect_language(text: str) -> str:
-    """Визначення мови з пріоритетом німецької"""
-    text = text.replace('\n', ' ').strip()
-    if len(text) < 50:
+    """Визначення мови з сильним пріоритетом німецької"""
+    text_lower = text.lower()
+    if len(text.strip()) < 50:
         return "de"
 
-    # Евристика: німецькі символи = німецька
+    # Евристика 1: німецькі символи = точно de
     if re.search(r'[äöüÄÖÜß]', text):
         return "de"
 
-    if lang_model:
-        pred = lang_model.predict(text, k=1)
-        lang = pred[0][0].replace('__label__', '')
-        prob = pred[1][0]
-        # Якщо ймовірність низька і є німецькі слова — німецька
-        if prob < 0.8 and any(word in text.lower() for word in ["gesund", "ernährung", "wohlbefinden", "energie", "frauen", "männer"]):
+    # Евристика 2: німецькі ключові слова (з твого тексту)
+    german_keywords = ["gesund", "ernährung", "wohlbefinden", "energie", "frauen", "männer", "ernährungstipps", "gesundheit", "bewusste"]
+    german_count = sum(1 for word in german_keywords if word in text_lower)
+    if german_count >= 2:
+        return "de"
+
+    # Евристика 3: якщо багато "ß", "ä" тощо — de
+    if text_lower.count('ß') + text_lower.count('ä') + text_lower.count('ö') + text_lower.count('ü') > 1:
+        return "de"
+
+    # langdetect як останній варіант
+    try:
+        lang = detect(text)
+        if lang in ['de', 'nl', 'da']:  # німецька + близькі
             return "de"
         return lang
-    else:
-        try:
-            return detect(text)
-        except LangDetectException:
-            return "de"
+    except LangDetectException:
+        return "de"  # дефолт для твого сайту
 
 def get_site_language(html_files: list) -> str:
     """Домінуюча мова сайту"""
@@ -60,14 +57,15 @@ def get_site_language(html_files: list) -> str:
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            text = re.sub(r'<[^>]+>', ' ', content)[:5000]
+            # Беремо текст без тегів, обмежуємо розмір
+            text = re.sub(r'<[^>]+>', ' ', content)[:10000]
             lang = detect_language(text)
             langs.append(lang)
         except:
             pass
     
     if not langs:
-        return "de"  # дефолт німецька
+        return "de"
 
     most_common = Counter(langs).most_common(1)[0][0]
     lang_map = {
@@ -80,13 +78,12 @@ def get_site_language(html_files: list) -> str:
     return lang_map.get(most_common, "Німецька")
 
 def rewrite_content(client, original_html: str, language: str) -> str:
-    """Рерайт тільки видимого тексту з жорстким збереженням структури"""
     prompt = f"""
-ТІЛЬКИ рефразуй видимий текст на мові '{language}' — зроби унікальним, природним, привабливим.
+ТІЛЬКИ рефразуй видимий текст на мові '{language}' — зроби його унікальним, природним, привабливим.
 ЗАБОРОНЕНО будь-які зміни крім тексту:
 - НЕ змінювати теги, атрибути, класи, id, name, value, placeholder, action, method, onclick, src, href
 - НЕ ламати форми, input, button, select, textarea, скрипти, стилі, посилання, зображення
-- НЕ додавати/видаляти елементи HTML
+- НЕ додавати/видаляти елементи
 - НЕ змінювати JS-код, події, структуру
 Замінюй ТІЛЬКИ чистий текст всередині тегів (h1-h6, p, li, span, div з текстом, label, option тощо).
 Контакти (адреса, телефон) — заміни на випадкові правдоподібні (адреса в Україні, +380 номер).
@@ -98,7 +95,7 @@ def rewrite_content(client, original_html: str, language: str) -> str:
 
     try:
         resp = client.chat.completions.create(
-            model="grok-code-fast-1",  # швидка модель для тексту та коду
+            model="grok-code-fast-1",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=8192,
@@ -183,7 +180,7 @@ if uploaded_files and api_key:
             all_rewritten_dirs.append(extract_dir)
             progress.progress(0.1 + (arch_idx+1)/len(archive_paths) * 0.4)
 
-        # 3. Клонування (створення 5 варіантів)
+        # 3. Клонування
         status.text("Створюємо 5 копій з новими доменами...")
         master_zip_path = os.path.join(temp_clones, "duplicates.zip")
         with zipfile.ZipFile(master_zip_path, 'w', zipfile.ZIP_DEFLATED) as master_zip:
@@ -191,9 +188,7 @@ if uploaded_files and api_key:
                 for dir_idx, rewritten_dir in enumerate(all_rewritten_dirs):
                     new_dir = os.path.join(temp_clones, f"var_{var_num}_arch_{dir_idx}")
                     shutil.copytree(rewritten_dir, new_dir, dirs_exist_ok=True)
-                    # Тут можна додати заміну доменів (наприклад, функцію replace_domain_in_dir)
-                    # Приклад: replace_domain_in_dir(new_dir, "old.com", f"newdomain{var_num}{domain_zone}")
-
+                    # Додай заміну доменів тут, якщо потрібно
                     for root, _, files in os.walk(new_dir):
                         for file in files:
                             full = os.path.join(root, file)
