@@ -7,7 +7,7 @@ import io
 import re
 from openai import OpenAI
 import fasttext
-from langdetect import detect, LangDetectException  # fallback, якщо fasttext не завантажиться
+from langdetect import detect, LangDetectException
 from collections import Counter
 
 st.set_page_config(
@@ -16,11 +16,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# Завантажуємо модель fasttext один раз (lid.176.bin — 176 мов)
+# Завантаження fasttext моделі (lid.176.bin — 176 мов)
 try:
     lang_model = fasttext.load_model('lid.176.bin')
 except Exception as e:
-    st.warning(f"Не вдалося завантажити fasttext модель: {e}. Використовуємо langdetect як fallback.")
+    st.warning(f"FastText модель не завантажилася: {e}. Використовуємо langdetect.")
     lang_model = None
 
 # Session state
@@ -30,39 +30,44 @@ if 'result' not in st.session_state:
     st.session_state.result = None
 
 def detect_language(text: str) -> str:
-    """Визначення мови за допомогою fasttext або langdetect"""
+    """Визначення мови з пріоритетом німецької"""
     text = text.replace('\n', ' ').strip()
     if len(text) < 50:
-        return "de"  # дефолт для німецької, можна змінити на "uk"
+        return "de"
+
+    # Евристика: німецькі символи = німецька
+    if re.search(r'[äöüÄÖÜß]', text):
+        return "de"
 
     if lang_model:
         pred = lang_model.predict(text, k=1)
         lang = pred[0][0].replace('__label__', '')
+        prob = pred[1][0]
+        # Якщо ймовірність низька і є німецькі слова — німецька
+        if prob < 0.8 and any(word in text.lower() for word in ["gesund", "ernährung", "wohlbefinden", "energie", "frauen", "männer"]):
+            return "de"
         return lang
     else:
-        # Fallback на langdetect
         try:
             return detect(text)
         except LangDetectException:
             return "de"
 
 def get_site_language(html_files: list) -> str:
-    """Визначає домінуючу мову сайту"""
+    """Домінуюча мова сайту"""
     langs = []
     for path in html_files:
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            # Беремо текст без тегів
-            text = re.sub(r'<[^>]+>', ' ', content)[:5000]  # обмежуємо розмір
+            text = re.sub(r'<[^>]+>', ' ', content)[:5000]
             lang = detect_language(text)
-            if lang:
-                langs.append(lang)
+            langs.append(lang)
         except:
             pass
     
     if not langs:
-        return "de"  # німецька як дефолт (можна змінити)
+        return "de"  # дефолт німецька
 
     most_common = Counter(langs).most_common(1)[0][0]
     lang_map = {
@@ -75,24 +80,25 @@ def get_site_language(html_files: list) -> str:
     return lang_map.get(most_common, "Німецька")
 
 def rewrite_content(client, original_html: str, language: str) -> str:
+    """Рерайт тільки видимого тексту з жорстким збереженням структури"""
     prompt = f"""
-ТІЛЬКИ рефразуй видимий текст на мові '{language}' — зроби його унікальним, природним, привабливим.
-ЗАБОРОНЕНО:
-- змінювати будь-які теги, атрибути, класи, id, name, value, placeholder, action, method форм
-- ламати структуру HTML, форми, input, button, select, скрипти, стилі, посилання, src зображень
-- додавати/видаляти елементи
-- змінювати JS-код, події onclick тощо
+ТІЛЬКИ рефразуй видимий текст на мові '{language}' — зроби унікальним, природним, привабливим.
+ЗАБОРОНЕНО будь-які зміни крім тексту:
+- НЕ змінювати теги, атрибути, класи, id, name, value, placeholder, action, method, onclick, src, href
+- НЕ ламати форми, input, button, select, textarea, скрипти, стилі, посилання, зображення
+- НЕ додавати/видаляти елементи HTML
+- НЕ змінювати JS-код, події, структуру
 Замінюй ТІЛЬКИ чистий текст всередині тегів (h1-h6, p, li, span, div з текстом, label, option тощо).
 Контакти (адреса, телефон) — заміни на випадкові правдоподібні (адреса в Україні, +380 номер).
 Якщо контактів не було — не додавай.
-Повертай ТІЛЬКИ повний HTML з заміненим текстом, без пояснень, без ```html.
+Повертай ТІЛЬКИ повний оригінальний HTML з заміненим текстом, без пояснень, без ```html чи markdown.
 Оригінал:
 {original_html}
 """
 
     try:
         resp = client.chat.completions.create(
-            model="grok-code-fast-1",
+            model="grok-code-fast-1",  # швидка модель для тексту та коду
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=8192,
@@ -103,7 +109,7 @@ def rewrite_content(client, original_html: str, language: str) -> str:
         st.warning(f"Помилка рерайту: {str(e)}. Залишаємо оригінал.")
         return original_html
 
-st.title("🌐 Rewriter + DUPLICATOR")
+st.title("🌐 Rewriter + DUPLICATOR — Рерайт тексту + Клонування")
 
 with st.expander("ℹ️ Як використовувати", expanded=True):
     st.markdown("""
@@ -177,7 +183,7 @@ if uploaded_files and api_key:
             all_rewritten_dirs.append(extract_dir)
             progress.progress(0.1 + (arch_idx+1)/len(archive_paths) * 0.4)
 
-        # 3. Клонування (заміна доменів — тут твій код або приклад)
+        # 3. Клонування (створення 5 варіантів)
         status.text("Створюємо 5 копій з новими доменами...")
         master_zip_path = os.path.join(temp_clones, "duplicates.zip")
         with zipfile.ZipFile(master_zip_path, 'w', zipfile.ZIP_DEFLATED) as master_zip:
@@ -185,9 +191,8 @@ if uploaded_files and api_key:
                 for dir_idx, rewritten_dir in enumerate(all_rewritten_dirs):
                     new_dir = os.path.join(temp_clones, f"var_{var_num}_arch_{dir_idx}")
                     shutil.copytree(rewritten_dir, new_dir, dirs_exist_ok=True)
-                    # Додай тут заміну доменів (наприклад, функцію replace_domain_in_dir)
-                    # Приклад:
-                    # replace_domain_in_dir(new_dir, "old-domain.com", f"newdomain{var_num}{domain_zone}")
+                    # Тут можна додати заміну доменів (наприклад, функцію replace_domain_in_dir)
+                    # Приклад: replace_domain_in_dir(new_dir, "old.com", f"newdomain{var_num}{domain_zone}")
 
                     for root, _, files in os.walk(new_dir):
                         for file in files:
@@ -207,7 +212,7 @@ if st.session_state.processed and st.session_state.result:
     with open(st.session_state.result['master_archive_path'], 'rb') as f:
         data = f.read()
     st.download_button(
-        label="⬇️ Скачати головний архів (всі копії з рерайтом)",
+        label="⬇️ Скачати головний архів (всі 5 варіантів з рерайтом)",
         data=data,
         file_name="rewritten_duplicates.zip",
         mime="application/zip"
