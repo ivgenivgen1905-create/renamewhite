@@ -5,97 +5,104 @@ import os
 import shutil
 import io
 from xai_sdk import Client
-from xai_sdk.tools import web_search
+from xai_sdk.tools import web_search  # для вбудованого пошуку
 
-st.title("Website Text Rewriter — 5 Variants")
+st.title("Rewriter: 5 варіантів сайту з рерайтом тексту")
 
-api_key = st.text_input("xAI API Key", type="password")
-business_name = st.text_input("Business name (for address/phone lookup)")
-uploaded_file = st.file_uploader("Upload website ZIP archive", type="zip")
+api_key = st.text_input("Введи xAI API Key", type="password")
+business_name = st.text_input("Назва бізнесу (для пошуку адреси/телефону в Google Maps)")
+uploaded_zip = st.file_uploader("Завантаж ZIP-архів сайту", type="zip")
 
-if uploaded_file and api_key and business_name:
-    if st.button("Start → Generate 5 Rewritten Versions"):
-        with st.spinner("Extracting ZIP, rewriting pages via Grok... (can take time)"):
+if uploaded_zip and api_key and business_name:
+    if st.button("Створити 5 варіантів рерайту"):
+        with st.spinner("Розпаковуємо архів, рерайтимо сторінки через Grok..."):
             temp_dir = tempfile.mkdtemp()
-            extract_dir = os.path.join(temp_dir, "original")
+            extract_dir = os.path.join(temp_dir, "orig")
             os.makedirs(extract_dir, exist_ok=True)
 
-            with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+            # Розпаковуємо ZIP
+            with zipfile.ZipFile(uploaded_zip, "r") as z:
+                z.extractall(extract_dir)
 
-            html_files = [os.path.join(root, f) for root, _, files in os.walk(extract_dir) for f in files if f.lower().endswith('.html')]
+            # Знаходимо всі .html
+            html_files = []
+            for root, dirs, files in os.walk(extract_dir):
+                for file in files:
+                    if file.lower().endswith(".html"):
+                        html_files.append(os.path.join(root, file))
 
             if not html_files:
-                st.error("ZIP archive has no .html files.")
+                st.error("У ZIP немає HTML-файлів.")
                 shutil.rmtree(temp_dir)
             else:
                 client = Client(api_key=api_key)
 
-                for variant in range(1, 6):
-                    st.write(f"→ Processing variant {variant}/5")
+                for var_num in range(1, 6):
+                    st.write(f"Генеруємо варіант {var_num} з 5...")
 
-                    variant_dir = os.path.join(temp_dir, f"variant_{variant}")
-                    shutil.copytree(extract_dir, variant_dir, dirs_exist_ok=True)
+                    var_dir = os.path.join(temp_dir, f"var_{var_num}")
+                    shutil.copytree(extract_dir, var_dir, dirs_exist_ok=True)
 
-                    for html_path in html_files:
-                        with open(html_path, 'r', encoding='utf-8') as f:
-                            original_html = f.read()
+                    for html_file in html_files:
+                        with open(html_file, "r", encoding="utf-8") as f:
+                            orig_html = f.read()
 
                         prompt = f"""
-Rewrite visible text on this webpage to be unique, natural, SEO-friendly and engaging.
-Keep ALL HTML structure, classes, ids, scripts, styles, links, images intact — change ONLY text content.
-Search for real business contact info (address, phone) using web_search tool.
-Business: '{business_name}'. Queries like: "{business_name} official address phone" or "Google Maps {business_name}".
-Replace existing contacts if found; otherwise leave original or add placeholder.
-Return ONLY clean HTML code — no extra text.
-HTML:
-{original_html}
+Перепиши весь видимий текст на сторінці: зроби унікальним, природним, привабливим.
+Зберігай 100% HTML-структуру, теги, атрибути, скрипти, стилі, посилання, картинки — НЕ чіпай їх.
+Для контактів (адреса, телефон, локація) — шукай реальні дані через web_search.
+Бізнес: '{business_name}'. Приклади запитів: "{business_name} адреса телефон", "{business_name} Google Maps".
+Заміни існуючі контакти на реальні, якщо знайдеш; інакше залиш або додай плейсхолдер.
+Повертай ТІЛЬКИ чистий HTML-код, без пояснень.
+Оригінальний HTML:
+{orig_html}
 """
 
-                        response = client.chat.completions.create(
+                        resp = client.chat.completions.create(
                             model="grok-4",
                             messages=[
-                                {"role": "system", "content": "Expert website content editor and rewriter."},
+                                {"role": "system", "content": "Ти експерт з рерайту веб-контенту."},
                                 {"role": "user", "content": prompt}
                             ],
                             tools=[web_search()],
-                            temperature=0.75 + (variant * 0.03),
+                            temperature=0.7 + (var_num * 0.05),
                             max_tokens=16384
                         )
 
-                        rewritten = response.choices[0].message.content.strip()
+                        new_html = resp.choices[0].message.content.strip()
 
-                        variant_path = html_path.replace(extract_dir, variant_dir)
-                        os.makedirs(os.path.dirname(variant_path), exist_ok=True)
-                        with open(variant_path, 'w', encoding='utf-8') as f:
-                            f.write(rewritten)
+                        new_path = html_file.replace(extract_dir, var_dir)
+                        os.makedirs(os.path.dirname(new_path), exist_ok=True)
+                        with open(new_path, "w", encoding="utf-8") as f:
+                            f.write(new_html)
 
-                    # ZIP variant
-                    zip_buffer = io.BytesIO()
-                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                        for root, _, files in os.walk(variant_dir):
-                            for file in files:
-                                fp = os.path.join(root, file)
-                                arc = os.path.relpath(fp, variant_dir)
-                                zf.write(fp, arc)
+                    # Створюємо ZIP у пам'яті
+                    zip_buf = io.BytesIO()
+                    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for rt, _, fs in os.walk(var_dir):
+                            for fl in fs:
+                                full = os.path.join(rt, fl)
+                                rel = os.path.relpath(full, var_dir)
+                                zf.write(full, rel)
 
-                    zip_buffer.seek(0)
+                    zip_buf.seek(0)
 
                     st.download_button(
-                        label=f"Download Variant {variant} (.zip)",
-                        data=zip_buffer,
-                        file_name=f"rewritten_variant_{variant}.zip",
+                        label=f"Завантажити варіант {var_num}",
+                        data=zip_buf,
+                        file_name=f"rewritten_var_{var_num}.zip",
                         mime="application/zip",
-                        key=f"dl_{variant}"
+                        key=f"btn_{var_num}"
                     )
 
                 shutil.rmtree(temp_dir)
-                st.success("Done! All 5 rewritten site variants are ready above ↓")
+                st.success("Готово! Завантажуй варіанти вище ↓")
+
 else:
-    st.info("Fill in all fields to start.")
+    st.info("Заповни всі поля, щоб почати.")
     if not api_key:
-        st.warning("→ xAI API key required (get at https://console.x.ai)")
+        st.warning("Потрібен xAI API Key → https://console.x.ai")
     if not business_name:
-        st.warning("→ Business name needed for accurate contact lookup.")
-    if not uploaded_file:
-        st.warning("→ Upload .zip with your static website files.")
+        st.warning("Вкажи назву бізнесу для пошуку контактів.")
+    if not uploaded_zip:
+        st.warning("Завантаж ZIP з сайтом (статичний, з HTML).")
