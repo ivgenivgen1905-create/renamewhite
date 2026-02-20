@@ -1,2 +1,2 @@
 streamlit
-xai-sdk
+openai
