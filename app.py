@@ -4,7 +4,7 @@ import tempfile
 import os
 import shutil
 import io
-from xai_sdk import Client
+from openai import OpenAI  # ← зміна тут!
 
 st.title("Rewriter: 5 варіантів сайту з рерайтом тексту")
 
@@ -20,27 +20,24 @@ if uploaded_zip and api_key and business_name and language:
             extract_dir = os.path.join(temp_dir, "orig")
             os.makedirs(extract_dir, exist_ok=True)
 
-            # Розпаковуємо ZIP
             with zipfile.ZipFile(uploaded_zip, "r") as z:
                 z.extractall(extract_dir)
 
-            # Знаходимо всі .html
-            html_files = []
-            for root, dirs, files in os.walk(extract_dir):
-                for file in files:
-                    if file.lower().endswith(".html"):
-                        html_files.append(os.path.join(root, file))
+            html_files = [os.path.join(root, f) for root, _, files in os.walk(extract_dir) for f in files if f.lower().endswith('.html')]
 
             if not html_files:
                 st.error("У ZIP немає HTML-файлів.")
                 shutil.rmtree(temp_dir)
             else:
                 try:
-                    client = Client(api_key=api_key)
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url="https://api.x.ai/v1"  # ← ключовий рядок!
+                    )
                 except Exception as e:
-                    st.error(f"Помилка з API-ключем: {str(e)}. Перевір ключ і баланс.")
+                    st.error(f"Помилка ініціалізації клієнта: {str(e)}. Перевір ключ і баланс.")
                     shutil.rmtree(temp_dir)
-                    st.stop()  # зупиняємо виконання, щоб не йти далі
+                    st.stop()
 
                 for var_num in range(1, 6):
                     st.write(f"Генеруємо варіант {var_num} з 5...")
@@ -55,31 +52,33 @@ if uploaded_zip and api_key and business_name and language:
                         prompt = f"""
 Перепиши весь видимий текст на сторінці: зроби унікальним, природним, привабливим на мові '{language}'.
 Зберігай 100% HTML-структуру, теги, атрибути, скрипти, стилі, посилання, картинки — НЕ чіпай їх.
-Для контактів (адреса, телефон, локація) — придумай випадкові, але правдоподібні дані на основі бізнесу '{business_name}' (використовуй свої знання: адреса в реальному місті, номер телефону в форматі країни).
+Для контактів (адреса, телефон, локація) — придумай випадкові, але правдоподібні дані на основі бізнесу '{business_name}' (використовуй свої знання: адреса в реальному місті України, номер телефону в форматі +380...).
 Заміни існуючі контакти на нові випадкові.
 Повертай ТІЛЬКИ чистий HTML-код, без пояснень.
 Оригінальний HTML:
 {orig_html}
 """
 
-                        resp = client.chat.completions.create(
-                            model="grok-4",
-                            messages=[
-                                {"role": "system", "content": "Ти експерт з рерайту веб-контенту на обраній мові з генерацією випадкових контактів."},
-                                {"role": "user", "content": prompt}
-                            ],
-                            temperature=0.7 + (var_num * 0.05),
-                            max_tokens=16384
-                        )
-
-                        new_html = resp.choices[0].message.content.strip()
+                        try:
+                            resp = client.chat.completions.create(
+                                model="grok-4",  # або "grok-beta", "grok-3" — перевір актуальні в https://console.x.ai/models
+                                messages=[
+                                    {"role": "system", "content": "Ти експерт з рерайту веб-контенту на обраній мові з генерацією випадкових контактів."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.7 + (var_num * 0.05),
+                                max_tokens=16384
+                            )
+                            new_html = resp.choices[0].message.content.strip()
+                        except Exception as e:
+                            st.error(f"Помилка під час рерайту: {str(e)}. Спробуй менший сайт або перевір баланс.")
+                            continue
 
                         new_path = html_file.replace(extract_dir, var_dir)
                         os.makedirs(os.path.dirname(new_path), exist_ok=True)
                         with open(new_path, "w", encoding="utf-8") as f:
                             f.write(new_html)
 
-                    # Створюємо ZIP у пам'яті
                     zip_buf = io.BytesIO()
                     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
                         for rt, _, fs in os.walk(var_dir):
@@ -106,8 +105,8 @@ else:
     if not api_key:
         st.warning("Потрібен xAI API Key → https://console.x.ai")
     if not business_name:
-        st.warning("Вкажи назву бізнесу для випадкових контактів.")
+        st.warning("Вкажи назву бізнесу.")
     if not language:
         st.warning("Обери мову рерайту.")
     if not uploaded_zip:
-        st.warning("Завантаж ZIP з сайтом (статичний, з HTML).")
+        st.warning("Завантаж ZIP з сайтом.")
