@@ -40,7 +40,7 @@ if uploaded_zip and api_key and business_name and language:
                 except Exception as e:
                     st.error(f"Помилка з API-ключем: {str(e)}. Перевір ключ і баланс.")
                     shutil.rmtree(temp_dir)
-                    return
+                    st.stop()  # зупиняємо виконання, щоб не йти далі
 
                 for var_num in range(1, 6):
                     st.write(f"Генеруємо варіант {var_num} з 5...")
