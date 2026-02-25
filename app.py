@@ -24,6 +24,7 @@ if 'result' not in st.session_state:
     st.session_state.result = None
 
 def generate_unique_site_names(theme, num=5):
+    """Генерація унікальних назв сайту на основі теми"""
     themes = {
         'здоров я': ['Vital', 'Health', 'Well', 'Pure', 'Balance', 'Life', 'Energy', 'Gesund'],
         'спорт': ['Sport', 'Fit', 'Active', 'Power', 'Gym', 'Run', 'Athlet', 'Train'],
@@ -44,12 +45,11 @@ def detect_language(text: str) -> str:
     if len(text.strip()) < 50:
         return "de"
 
-    # Ультра-посилена для індонезійської
+    # Ультра-посилена евристика для індонезійської
     indonesian_strong = ["gizi", "ahli gizi", "pola makan", "sehari-hari", "seimbang", "kesehatan", "suplemen", "vitamin", "makanan", "diet", "hidup sehat"]
     indo_strong_count = sum(1 for word in indonesian_strong if word in text_lower)
     indonesian_weak = ["dalam", "untuk", "dan", "ini", "sangat", "penting", "pendekatan", "berbasis", "alami", "modern", "memandang", "sebagai", "bagian", "gaya hidup", "keseimbangan", "keteraturan", "pemilihan", "komponen", "sadar"]
     indo_weak_count = sum(1 for word in indonesian_weak if word in text_lower)
-
     if indo_strong_count >= 1 or (indo_strong_count + indo_weak_count >= 5):
         return "id"
 
@@ -61,14 +61,90 @@ def detect_language(text: str) -> str:
     if re.search(r'[ăĂâÂîÎșȘțȚ]', text) or any(w in text_lower for w in ["cum", "să", "alegi", "vitaminele", "potrivite", "sfaturile", "nutriționistului", "pentru", "dietă", "echilibrată", "sănătate"]):
         return "ro"
 
-    # ... (додай інші мови за потребою)
+    # Українська
+    if any(w in text_lower for w in ["здоров", "здоров'я", "енергія", "жінки", "чоловіки", "життя", "баланс"]):
+        return "uk"
+
+    # Російська
+    if any(w in text_lower for w in ["здоровье", "питание", "энергия", "женщины", "мужчины", "жизнь"]):
+        return "ru"
+
+    # Англійська
+    if any(w in text_lower for w in ["health", "nutrition", "energy", "women", "men", "life"]):
+        return "en"
+
+    # Французька
+    if any(w in text_lower for w in ["santé", "nutrition", "énergie", "femmes", "hommes", "vie"]):
+        return "fr"
+
+    # Іспанська
+    if any(w in text_lower for w in ["salud", "nutrición", "energía", "mujeres", "hombres", "vida"]):
+        return "es"
+
+    # Італійська
+    if any(w in text_lower for w in ["salute", "nutrizione", "energia", "donne", "uomini", "vita"]):
+        return "it"
+
+    # Польська
+    if any(w in text_lower for w in ["zdrowie", "odżywianie", "energia", "kobiety", "mężczyźni", "życie"]):
+        return "pl"
+
+    # Нідерландська
+    if any(w in text_lower for w in ["gezondheid", "voeding", "energie", "vrouwen", "mannen", "leven"]):
+        return "nl"
+
+    # Шведська
+    if any(w in text_lower for w in ["hälsa", "näring", "energi", "kvinnor", "män", "liv"]):
+        return "sv"
+
+    # Португальська
+    if any(w in text_lower for w in ["saúde", "nutrição", "energia", "mulheres", "homens", "vida"]):
+        return "pt"
+
+    # Словенська
+    if any(w in text_lower for w in ["zdravje", "prehrana", "energija", "ženske", "moški", "življenje"]):
+        return "sl"
+
+    # Словацька
+    if any(w in text_lower for w in ["zdravie", "výživa", "energia", "ženy", "muži", "život"]):
+        return "sk"
+
+    # Малайська
+    if any(w in text_lower for w in ["kesihatan", "pemakanan", "tenaga", "wanita", "lelaki", "hidup"]):
+        return "ms"
+
+    # Індійська (хінді)
+    if re.search(r'[हिन्दी]', text) or any(w in text_lower for w in ["स्वास्थ्य", "पोषण", "ऊर्जा", "महिलाएं", "पुरुष", "जीवन"]):
+        return "hi"
+
+    # Чеська
+    if any(w in text_lower for w in ["zdraví", "výživa", "energie", "ženy", "muži", "život"]):
+        return "cs"
+
+    # Угорська
+    if any(w in text_lower for w in ["egészség", "táplálkozás", "energia", "nők", "férfiak", "élet"]):
+        return "hu"
+
+    # Сербська
+    if any(w in text_lower for w in ["здравље", "исхрана", "енергија", "жене", "мушкарци", "живот"]):
+        return "sr"
+
+    # Грецька
+    if re.search(r'[αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ]', text) or any(w in text_lower for w in ["υγεία", "διατροφή", "ενέργεια", "γυναίκες", "άνδρες", "ζωή"]):
+        return "el"
+
+    # Турецька
+    if any(w in text_lower for w in ["sağlık", "beslenme", "enerji", "kadınlar", "erkekler", "hayat"]):
+        return "tr"
+
+    # Арабська
+    if re.search(r'[عربي]', text) or any(w in text_lower for w in ["صحة", "تغذية", "طاقة", "نساء", "رجال", "حياة"]):
+        return "ar"
 
     try:
         lang = detect(text)
         if lang in ['id', 'ms']:
             return "id"
-        if lang in ['ro', 'fr', 'it', 'es'] and re.search(r'[ăĂâÂîÎșȘțȚ]', text):
-            return "ro"
         return lang
     except LangDetectException:
         return "de"
@@ -187,7 +263,7 @@ def rewrite_content(client, original_html: str, language: str, new_site_name: st
 Заміни назву сайту на '{new_site_name}' всюди, де вона згадується в тексті.
 Контакти (адреса, телефон) — заміни на випадкові правдоподібні (адреса в {country}, номер телефону {phone_prefix}...).
 Якщо контактів не було — не додавай їх.
-Повертай ТІЛЬКИ повний HTML з заміненим текстом, без пояснень.
+Повертай ТІЛЬКИ повний HTML/PHP з заміненим текстом, без пояснень.
 Оригінал:
 {original_html}
 """
@@ -273,31 +349,32 @@ if uploaded_files and api_key and theme:
                         st.warning(f"Не вдалося розпакувати {os.path.basename(arch)}")
                         continue
 
-                    html_files = [os.path.join(root, f) for root, _, fs in os.walk(extract_dir) for f in fs if f.lower().endswith(('.html', '.htm'))]
+                    # Фільтруємо .html, .htm та .php файли для рерайту
+                    text_files = [os.path.join(root, f) for root, _, fs in os.walk(extract_dir) for f in fs if f.lower().endswith(('.html', '.htm', '.php'))]
 
-                    lang = get_site_language(html_files)
+                    lang = get_site_language(text_files)
                     st.info(f"Мова для варіанта {var_num} архіву {os.path.basename(arch)}: {lang}")
 
                     new_site_name = unique_names[name_index]
                     name_index += 1
 
                     rewritten_count = 0
-                    for html in html_files:
-                        with open(html, 'r', encoding='utf-8', errors='ignore') as f:
+                    for file_path in text_files:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                             content = f.read()
                         new_content = rewrite_content(client, content, lang, new_site_name)
-                        with open(html, 'w', encoding='utf-8') as f:
+                        with open(file_path, 'w', encoding='utf-8') as f:
                             f.write(new_content)
                         rewritten_count += 1
 
-                    # Додаємо в головний архів ВСІ файли
+                    # Додаємо в головний архів ВСІ файли (включаючи не-html/php)
                     for root, _, files in os.walk(extract_dir):
                         for file in files:
                             full = os.path.join(root, file)
                             arc = os.path.relpath(full, temp_rewritten)
                             master_zip.write(full, arc)
 
-                    st.info(f"Варіант {var_num} архіву {arch_idx} готовий: {rewritten_count} сторінок переписано, нова назва {new_site_name}")
+                    st.info(f"Варіант {var_num} архіву {arch_idx} готовий: {rewritten_count} файлів переписано, нова назва {new_site_name}")
 
                     progress.progress(0.1 + (var_num * (arch_idx+1)) / (copies_count * len(archive_paths)) * 0.9)
 
