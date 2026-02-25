@@ -1,3 +1,5 @@
 streamlit
 openai
 langdetect
+anthropic
+google-generativeai
