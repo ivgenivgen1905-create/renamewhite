@@ -11,9 +11,11 @@ from openai import OpenAI
 from langdetect import detect, LangDetectException
 from collections import Counter
 
-# Додаємо клієнтів для Claude та Gemini
-from anthropic import Anthropic  # pip install anthropic
-import google.generativeai as genai  # pip install google-generativeai
+# Для Claude
+from anthropic import Anthropic
+
+# Для Gemini
+import google.generativeai as genai
 
 st.set_page_config(
     page_title="Rewriter + DUPLICATOR — Рерайт тексту + Клонування",
@@ -54,14 +56,92 @@ def detect_language(text: str) -> str:
         return "de"
 
     # Румунська
-    if re.search(r'[ăĂâÂîÎșȘțȚ]', text) or any(w in text_lower for w in ["cum", "să", "alegi", "vitaminele", "potrivite", "sfaturile", "nutriționistului", "pentru", "dietă", "echilibrată"]):
+    if re.search(r'[ăĂâÂîÎșȘțȚ]', text) or any(w in text_lower for w in ["cum", "să", "alegi", "vitaminele", "potrivite", "sfaturile", "nutriționistului", "pentru", "dietă", "echilibrată", "sănătate", "alimentație"]):
         return "ro"
 
     # Індонезійська
     if any(w in text_lower for w in ["gizi", "ahli", "makan", "sehari-hari", "pola", "kesehatan", "hidup", "seimbang", "dalam", "untuk", "dan", "ini", "sangat", "penting"]):
         return "id"
 
-    # ... (решта евристики для інших мов, як раніше)
+    # Українська
+    if any(w in text_lower for w in ["здоров", "здоров'я", "енергія", "жінки", "чоловіки", "життя", "баланс"]):
+        return "uk"
+
+    # Російська
+    if any(w in text_lower for w in ["здоровье", "питание", "энергия", "женщины", "мужчины", "жизнь"]):
+        return "ru"
+
+    # Англійська
+    if any(w in text_lower for w in ["health", "nutrition", "energy", "women", "men", "life"]):
+        return "en"
+
+    # Французька
+    if any(w in text_lower for w in ["santé", "nutrition", "énergie", "femmes", "hommes", "vie"]):
+        return "fr"
+
+    # Іспанська
+    if any(w in text_lower for w in ["salud", "nutrición", "energía", "mujeres", "hombres", "vida"]):
+        return "es"
+
+    # Італійська
+    if any(w in text_lower for w in ["salute", "nutrizione", "energia", "donne", "uomini", "vita"]):
+        return "it"
+
+    # Польська
+    if any(w in text_lower for w in ["zdrowie", "odżywianie", "energia", "kobiety", "mężczyźni", "życie"]):
+        return "pl"
+
+    # Нідерландська
+    if any(w in text_lower for w in ["gezondheid", "voeding", "energie", "vrouwen", "mannen", "leven"]):
+        return "nl"
+
+    # Шведська
+    if any(w in text_lower for w in ["hälsa", "näring", "energi", "kvinnor", "män", "liv"]):
+        return "sv"
+
+    # Португальська
+    if any(w in text_lower for w in ["saúde", "nutrição", "energia", "mulheres", "homens", "vida"]):
+        return "pt"
+
+    # Словенська
+    if any(w in text_lower for w in ["zdravje", "prehrana", "energija", "ženske", "moški", "življenje"]):
+        return "sl"
+
+    # Словацька
+    if any(w in text_lower for w in ["zdravie", "výživa", "energia", "ženy", "muži", "život"]):
+        return "sk"
+
+    # Малайська
+    if any(w in text_lower for w in ["kesihatan", "pemakanan", "tenaga", "wanita", "lelaki", "hidup"]):
+        return "ms"
+
+    # Індійська (хінді)
+    if re.search(r'[हिन्दी]', text) or any(w in text_lower for w in ["स्वास्थ्य", "पोषण", "ऊर्जा", "महिलाएं", "पुरुष", "जीवन"]):
+        return "hi"
+
+    # Чеська
+    if any(w in text_lower for w in ["zdraví", "výživa", "energie", "ženy", "muži", "život"]):
+        return "cs"
+
+    # Угорська
+    if any(w in text_lower for w in ["egészség", "táplálkozás", "energia", "nők", "férfiak", "élet"]):
+        return "hu"
+
+    # Сербська
+    if any(w in text_lower for w in ["здравље", "исхрана", "енергија", "жене", "мушкарци", "живот"]):
+        return "sr"
+
+    # Грецька
+    if re.search(r'[αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ]', text) or any(w in text_lower for w in ["υγεία", "διατροφή", "ενέργεια", "γυναίκες", "άνδρες", "ζωή"]):
+        return "el"
+
+    # Турецька
+    if any(w in text_lower for w in ["sağlık", "beslenme", "enerji", "kadınlar", "erkekler", "hayat"]):
+        return "tr"
+
+    # Арабська
+    if re.search(r'[عربي]', text) or any(w in text_lower for w in ["صحة", "تغذية", "طاقة", "نساء", "رجال", "حياة"]):
+        return "ar"
 
     try:
         lang = detect(text)
@@ -202,9 +282,9 @@ def rewrite_content(client, original_html: str, language: str, new_site_name: st
             return resp.choices[0].message.content.strip()
 
         elif provider == "Claude":
-            anthropic_client = Anthropic(api_key=claude_api_key)
+            anthropic_client = Anthropic(api_key=api_key)
             message = anthropic_client.messages.create(
-                model="claude-3-opus-20240229",  # або "claude-3-sonnet-20240229"
+                model="claude-3-opus-20240229",  # або claude-3-sonnet-20240229
                 max_tokens=8192,
                 temperature=0.7,
                 messages=[{"role": "user", "content": prompt}]
@@ -212,8 +292,8 @@ def rewrite_content(client, original_html: str, language: str, new_site_name: st
             return message.content[0].text.strip()
 
         elif provider == "Gemini":
-            genai.configure(api_key=gemini_api_key)
-            model = genai.GenerativeModel('gemini-1.5-pro')  # або gemini-1.5-flash для швидкості
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-pro')  # або gemini-1.5-flash
             response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
@@ -242,15 +322,8 @@ with st.expander("ℹ️ Як використовувати", expanded=True):
 # Вибір AI-провайдера
 provider = st.selectbox("AI-провайдер для рерайту", ["Grok", "Claude", "Gemini"], index=0)
 
-# Поля для ключів
+# Поле для ключа
 api_key = st.text_input(f"{provider} API Key", type="password")
-
-if provider == "Claude":
-    claude_api_key = api_key
-elif provider == "Gemini":
-    gemini_api_key = api_key
-else:
-    grok_api_key = api_key
 
 theme = st.text_input("Тема сайту (для генерації назв)", value="здоров я")
 
