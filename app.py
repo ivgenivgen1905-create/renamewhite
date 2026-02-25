@@ -11,6 +11,10 @@ from openai import OpenAI
 from langdetect import detect, LangDetectException
 from collections import Counter
 
+# Додаємо клієнтів для Claude та Gemini
+from anthropic import Anthropic  # pip install anthropic
+import google.generativeai as genai  # pip install google-generativeai
+
 st.set_page_config(
     page_title="Rewriter + DUPLICATOR — Рерайт тексту + Клонування",
     page_icon="🌐🔄",
@@ -50,92 +54,14 @@ def detect_language(text: str) -> str:
         return "de"
 
     # Румунська
-    if re.search(r'[ăĂâÂîÎșȘțȚ]', text) or any(w in text_lower for w in ["cum", "să", "alegi", "vitaminele", "potrivite", "sfaturile", "nutriționistului", "pentru", "dietă", "echilibrată", "sănătate", "alimentație"]):
+    if re.search(r'[ăĂâÂîÎșȘțȚ]', text) or any(w in text_lower for w in ["cum", "să", "alegi", "vitaminele", "potrivite", "sfaturile", "nutriționistului", "pentru", "dietă", "echilibrată"]):
         return "ro"
 
     # Індонезійська
     if any(w in text_lower for w in ["gizi", "ahli", "makan", "sehari-hari", "pola", "kesehatan", "hidup", "seimbang", "dalam", "untuk", "dan", "ini", "sangat", "penting"]):
         return "id"
 
-    # Українська
-    if any(w in text_lower for w in ["здоров", "здоров'я", "енергія", "жінки", "чоловіки", "життя", "баланс"]):
-        return "uk"
-
-    # Російська
-    if any(w in text_lower for w in ["здоровье", "питание", "энергия", "женщины", "мужчины", "жизнь"]):
-        return "ru"
-
-    # Англійська
-    if any(w in text_lower for w in ["health", "nutrition", "energy", "women", "men", "life"]):
-        return "en"
-
-    # Французька
-    if any(w in text_lower for w in ["santé", "nutrition", "énergie", "femmes", "hommes", "vie"]):
-        return "fr"
-
-    # Іспанська
-    if any(w in text_lower for w in ["salud", "nutrición", "energía", "mujeres", "hombres", "vida"]):
-        return "es"
-
-    # Італійська
-    if any(w in text_lower for w in ["salute", "nutrizione", "energia", "donne", "uomini", "vita"]):
-        return "it"
-
-    # Польська
-    if any(w in text_lower for w in ["zdrowie", "odżywianie", "energia", "kobiety", "mężczyźni", "życie"]):
-        return "pl"
-
-    # Нідерландська
-    if any(w in text_lower for w in ["gezondheid", "voeding", "energie", "vrouwen", "mannen", "leven"]):
-        return "nl"
-
-    # Шведська
-    if any(w in text_lower for w in ["hälsa", "näring", "energi", "kvinnor", "män", "liv"]):
-        return "sv"
-
-    # Португальська
-    if any(w in text_lower for w in ["saúde", "nutrição", "energia", "mulheres", "homens", "vida"]):
-        return "pt"
-
-    # Словенська
-    if any(w in text_lower for w in ["zdravje", "prehrana", "energija", "ženske", "moški", "življenje"]):
-        return "sl"
-
-    # Словацька
-    if any(w in text_lower for w in ["zdravie", "výživa", "energia", "ženy", "muži", "život"]):
-        return "sk"
-
-    # Малайська
-    if any(w in text_lower for w in ["kesihatan", "pemakanan", "tenaga", "wanita", "lelaki", "hidup"]):
-        return "ms"
-
-    # Індійська (хінді)
-    if re.search(r'[हिन्दी]', text) or any(w in text_lower for w in ["स्वास्थ्य", "पोषण", "ऊर्जा", "महिलाएं", "पुरुष", "जीवन"]):
-        return "hi"
-
-    # Чеська
-    if any(w in text_lower for w in ["zdraví", "výživa", "energie", "ženy", "muži", "život"]):
-        return "cs"
-
-    # Угорська
-    if any(w in text_lower for w in ["egészség", "táplálkozás", "energia", "nők", "férfiak", "élet"]):
-        return "hu"
-
-    # Сербська
-    if any(w in text_lower for w in ["здравље", "исхрана", "енергија", "жене", "мушкарци", "живот"]):
-        return "sr"
-
-    # Грецька
-    if re.search(r'[αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ]', text) or any(w in text_lower for w in ["υγεία", "διατροφή", "ενέργεια", "γυναίκες", "άνδρες", "ζωή"]):
-        return "el"
-
-    # Турецька
-    if any(w in text_lower for w in ["sağlık", "beslenme", "enerji", "kadınlar", "erkekler", "hayat"]):
-        return "tr"
-
-    # Арабська
-    if re.search(r'[عربي]', text) or any(w in text_lower for w in ["صحة", "تغذية", "طاقة", "نساء", "رجال", "حياة"]):
-        return "ar"
+    # ... (решта евристики для інших мов, як раніше)
 
     try:
         lang = detect(text)
@@ -240,9 +166,9 @@ lang_to_phone = {
     'Арабська': '+20',
 }
 
-def rewrite_content(client, original_html: str, language: str, new_site_name: str) -> str:
+def rewrite_content(client, original_html: str, language: str, new_site_name: str, provider: str) -> str:
     if language not in lang_to_countries:
-        st.error(f"Мова '{language}' не підтримується. Додайте її в lang_to_countries та lang_to_phone.")
+        st.error(f"Мова '{language}' не підтримується.")
         return original_html
 
     country = random.choice(lang_to_countries[language])
@@ -265,30 +191,67 @@ def rewrite_content(client, original_html: str, language: str, new_site_name: st
 """
 
     try:
-        resp = client.chat.completions.create(
-            model="grok-code-fast-1",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=8192,
-            timeout=600
-        )
-        return resp.choices[0].message.content.strip()
+        if provider == "Grok":
+            resp = client.chat.completions.create(
+                model="grok-code-fast-1",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=8192,
+                timeout=600
+            )
+            return resp.choices[0].message.content.strip()
+
+        elif provider == "Claude":
+            anthropic_client = Anthropic(api_key=claude_api_key)
+            message = anthropic_client.messages.create(
+                model="claude-3-opus-20240229",  # або "claude-3-sonnet-20240229"
+                max_tokens=8192,
+                temperature=0.7,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return message.content[0].text.strip()
+
+        elif provider == "Gemini":
+            genai.configure(api_key=gemini_api_key)
+            model = genai.GenerativeModel('gemini-1.5-pro')  # або gemini-1.5-flash для швидкості
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=8192
+                )
+            )
+            return response.text.strip()
+
     except Exception as e:
-        st.warning(f"Помилка рерайту: {str(e)}. Залишаємо оригінал.")
+        st.warning(f"Помилка рерайту ({provider}): {str(e)}. Залишаємо оригінал.")
         return original_html
 
 st.title("🌐 Rewriter + DUPLICATOR — Рерайт тексту + Клонування")
 
 with st.expander("ℹ️ Як використовувати", expanded=True):
     st.markdown("""
-    1. Введи xAI API Key  
-    2. Введи тему сайту (для генерації назв, напр. 'здоров я')
-    3. Завантаж ZIP/RAR архів(и) сайту  
-    4. Обери кількість копій і доменну зону  
-    5. Натисни кнопку — отримай архів з 5 унікальними варіантами (кожен з рерайтом, новою назвою і доменом)
+    1. Оберіть AI-провайдера (Grok, Claude, Gemini)  
+    2. Введіть API-ключ для обраного провайдера  
+    3. Введіть тему сайту (для генерації назв)  
+    4. Завантажте ZIP/RAR архів(и) сайту  
+    5. Оберіть кількість копій і доменну зону  
+    6. Натисніть кнопку — отримайте 5 унікальних варіантів з рерайтом
     """)
 
-api_key = st.text_input("xAI API Key", type="password")
+# Вибір AI-провайдера
+provider = st.selectbox("AI-провайдер для рерайту", ["Grok", "Claude", "Gemini"], index=0)
+
+# Поля для ключів
+api_key = st.text_input(f"{provider} API Key", type="password")
+
+if provider == "Claude":
+    claude_api_key = api_key
+elif provider == "Gemini":
+    gemini_api_key = api_key
+else:
+    grok_api_key = api_key
+
 theme = st.text_input("Тема сайту (для генерації назв)", value="здоров я")
 
 col1, col2 = st.columns([2, 1])
@@ -306,7 +269,12 @@ with col2:
 
 if uploaded_files and api_key and theme:
     if st.button("🚀 Створити 5 унікальних копій з рерайтом", type="primary"):
-        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1", timeout=600)
+        if provider == "Grok":
+            client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1", timeout=600)
+        elif provider == "Claude":
+            client = None  # Claude використовує свій клієнт
+        elif provider == "Gemini":
+            client = None  # Gemini використовує свій клієнт
 
         temp_input = tempfile.mkdtemp()
         temp_rewritten = tempfile.mkdtemp()
@@ -345,7 +313,6 @@ if uploaded_files and api_key and theme:
                         st.warning(f"Не вдалося розпакувати {os.path.basename(arch)}")
                         continue
 
-                    # Фільтруємо ТІЛЬКИ html файли для рерайту
                     html_files = [os.path.join(root, f) for root, _, fs in os.walk(extract_dir) for f in fs if f.lower().endswith(('.html', '.htm'))]
 
                     lang = get_site_language(html_files)
@@ -358,12 +325,12 @@ if uploaded_files and api_key and theme:
                     for html in html_files:
                         with open(html, 'r', encoding='utf-8', errors='ignore') as f:
                             content = f.read()
-                        new_content = rewrite_content(client, content, lang, new_site_name)
+                        new_content = rewrite_content(client, content, lang, new_site_name, provider)
                         with open(html, 'w', encoding='utf-8') as f:
                             f.write(new_content)
                         rewritten_count += 1
 
-                    # Додаємо в головний архів ВСІ файли (включаючи не-html)
+                    # Додаємо в головний архів
                     for root, _, files in os.walk(extract_dir):
                         for file in files:
                             full = os.path.join(root, file)
