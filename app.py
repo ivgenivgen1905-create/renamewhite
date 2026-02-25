@@ -270,7 +270,7 @@ def rewrite_content(client, original_html: str, language: str, new_site_name: st
 
     try:
         resp = client.chat.completions.create(
-            model="grok-code-fast-1",
+            model="grok-4-1-fast-reasoning",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=8192,
